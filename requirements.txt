@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+redis
+pydantic
+pydantic-settings
+email-validator
+supabase
+httpx
