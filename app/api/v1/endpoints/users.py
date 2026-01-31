@@ -1,11 +1,76 @@
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserRole
-from app.core.security import get_current_user, get_current_admin
+from datetime import datetime
+from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserRole, UserExistsResponse, UserCreateRequest
+from app.core.security import get_current_user, get_current_admin, get_current_auth_user
 from app.db.supabase import get_supabase
 
 router = APIRouter()
+
+@router.get("/check-exists", response_model=UserExistsResponse)
+def check_user_exists(
+    current_auth_user = Depends(get_current_auth_user)
+):
+    """
+    Check if the authenticated user has a profile in the users table.
+    Requires a valid JWT token.
+    """
+    supabase = get_supabase()
+    user_id = current_auth_user.id
+    
+    # Check ID
+    response = supabase.table("users").select("id").eq("id", user_id).execute()
+    if response.data:
+        return UserExistsResponse(exists=True, conflict_field="id")
+            
+    return UserExistsResponse(exists=False)
+
+@router.post("/", response_model=UserResponse)
+def create_user(
+    user_in: UserCreateRequest,
+    current_auth_user = Depends(get_current_auth_user)
+):
+    """
+    Create a new user profile.
+    This should be called after Supabase Auth signup.
+    Requires a valid JWT token. 
+    User ID and Email are extracted from the token.
+    """
+    supabase = get_supabase()
+    
+    # Extract ID and Email from the verified token
+    user_id = current_auth_user.id
+    user_email = current_auth_user.email
+    
+    if not user_id or not user_email:
+        raise HTTPException(status_code=400, detail="Token missing user ID or email")
+    
+    # Check if user already exists
+    # We check by ID primarily as it's the specific record key
+    existing_id = supabase.table("users").select("id").eq("id", user_id).execute()
+    if existing_id.data:
+         raise HTTPException(status_code=400, detail="User profile already exists")
+    
+    # Check username uniqueness (since username is set by user)
+    existing_username = supabase.table("users").select("id").eq("username", user_in.username).execute()
+    if existing_username.data:
+         raise HTTPException(status_code=400, detail="User with this username already exists")
+         
+    user_data = user_in.model_dump()
+    user_data["id"] = user_id
+    user_data["email"] = user_email
+    user_data["password_hash"] = "managed_by_supabase_auth"
+    user_data["role"] = "user" # Default role
+    user_data["created_at"] = datetime.utcnow().isoformat()
+    user_data["updated_at"] = datetime.utcnow().isoformat()
+    
+    response = supabase.table("users").insert(user_data).execute()
+    
+    if not response.data:
+        raise HTTPException(status_code=400, detail="Could not create user")
+        
+    return response.data[0]
 
 @router.get("/me", response_model=UserResponse)
 def read_user_me(

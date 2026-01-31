@@ -47,6 +47,32 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+async def get_current_auth_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Verifies the JWT token using Supabase's client and returns the Auth User object.
+    Does NOT check the public.users table.
+    """
+    token = credentials.credentials
+    supabase = get_supabase()
+    
+    try:
+        auth_response = supabase.auth.get_user(token)
+        if not auth_response or not auth_response.user:
+             raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return auth_response.user
+        
+    except Exception as e:
+        print(f"Auth specific error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
 def get_current_admin(current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin":
         raise HTTPException(
