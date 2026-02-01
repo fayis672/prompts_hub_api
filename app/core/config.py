@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
 
+    # Logging
+    LOG_LEVEL: str = "INFO"
+
     class Config:
         case_sensitive = True
         env_file = ".env"
