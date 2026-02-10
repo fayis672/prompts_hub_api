@@ -43,11 +43,15 @@ def step(msg):
 # --- Data Definitions ---
 
 CATEGORIES = [
-    {"name": "Writing", "slug": "writing", "description": "Prompts for creative writing and storytelling.", "icon_url": "https://example.com/icons/writing.png", "color_code": "#FF5733"},
-    {"name": "Coding", "slug": "coding", "description": "Code generation and debugging prompts.", "icon_url": "https://example.com/icons/coding.png", "color_code": "#33FF57"},
-    {"name": "Art", "slug": "art", "description": "AI Art generation prompts (Midjourney, DALL-E).", "icon_url": "https://example.com/icons/art.png", "color_code": "#3357FF"},
-    {"name": "Business", "slug": "business", "description": "Professional and business related prompts.", "icon_url": "https://example.com/icons/business.png", "color_code": "#F1C40F"},
-    {"name": "Education", "slug": "education", "description": "Learning and educational prompts.", "icon_url": "https://example.com/icons/education.png", "color_code": "#9B59B6"},
+    {"name": "Image Generation", "slug": "image-generation", "description": "Prompts for AI image generators like Midjourney, DALL-E, and Stable Diffusion.", "icon_url": "https://example.com/icons/image.png", "color_code": "#FF5733"},
+    {"name": "Video Generation", "slug": "video-generation", "description": "Prompts for AI video creation tools like Sora, Runway, and Pika.", "icon_url": "https://example.com/icons/video.png", "color_code": "#33FF57"},
+    {"name": "Audio & Music", "slug": "audio-music", "description": "Prompts for music generation, voice synthesis, and audio editing.", "icon_url": "https://example.com/icons/audio.png", "color_code": "#3357FF"},
+    {"name": "Coding & Development", "slug": "coding-development", "description": "Programming, debugging, and software architecture prompts.", "icon_url": "https://example.com/icons/coding.png", "color_code": "#9B59B6"},
+    {"name": "PDF & Document Analysis", "slug": "pdf-document-analysis", "description": "Prompts for summarizing, analyzing, and extracting data from documents.", "icon_url": "https://example.com/icons/pdf.png", "color_code": "#E74C3C"},
+    {"name": "Writing & Content", "slug": "writing-content", "description": "Creative writing, blogging, and copywriting prompts.", "icon_url": "https://example.com/icons/writing.png", "color_code": "#F1C40F"},
+    {"name": "Business & Marketing", "slug": "business-marketing", "description": "Professional prompts for strategy, marketing, and productivity.", "icon_url": "https://example.com/icons/business.png", "color_code": "#1ABC9C"},
+    {"name": "Education & Learning", "slug": "education-learning", "description": "Study aids, lesson planning, and academic prompts.", "icon_url": "https://example.com/icons/education.png", "color_code": "#34495E"},
+    {"name": "Lifestyle & Personal", "slug": "lifestyle-personal", "description": "Health, travel, cooking, and hobby prompts.", "icon_url": "https://example.com/icons/lifestyle.png", "color_code": "#D35400"},
 ]
 
 TAGS = [

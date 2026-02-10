@@ -167,3 +167,44 @@ def update_user_by_id(
          raise HTTPException(status_code=400, detail="Could not update user")
          
     return response.data[0]
+
+
+@router.get("/recommendations/prompters", response_model=List[UserResponse])
+def get_recommended_prompters(
+    limit: int = Query(5, gt=0, le=20),
+    current_user = Depends(get_current_user)
+):
+    """
+    Get recommended prompters (creators) based on current user's engagements.
+    Identifies users whose prompts the current user has rated highly, bookmarked, or commented on.
+    """
+    supabase = get_supabase()
+    user_id = current_user["id"]
+
+    # 1. Get creator IDs from ratings
+    # We join with prompts to get user_id of the creator
+    ratings = supabase.table("prompt_ratings").select("prompts(user_id)").eq("user_id", user_id).gte("rating", 4).execute()
+    creator_ids = [r["prompts"]["user_id"] for r in ratings.data if r.get("prompts")]
+
+    # 2. Get creator IDs from bookmarks
+    bookmarks = supabase.table("bookmarks").select("prompts(user_id)").eq("user_id", user_id).execute()
+    creator_ids.extend([b["prompts"]["user_id"] for b in bookmarks.data if b.get("prompts")])
+
+    # 3. Get creator IDs from comments
+    comments = supabase.table("comments").select("prompts(user_id)").eq("user_id", user_id).execute()
+    creator_ids.extend([c["prompts"]["user_id"] for c in comments.data if c.get("prompts")])
+
+    # Filter out current user and count frequencies
+    from collections import Counter
+    creator_counts = Counter([cid for cid in creator_ids if cid != user_id])
+    
+    top_creator_ids = [cid for cid, count in creator_counts.most_common(limit)]
+
+    if not top_creator_ids:
+        # Fallback: Just return some active public users (excluding me)
+        response = supabase.table("users").select("*").neq("id", user_id).limit(limit).execute()
+        return response.data
+
+    # Fetch full user details for the top creators
+    response = supabase.table("users").select("*").in_("id", top_creator_ids).execute()
+    return response.data

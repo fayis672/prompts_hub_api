@@ -262,3 +262,55 @@ def unbookmark_prompt(
     return None
 
 
+@router.get("/recommendations/prompts", response_model=List[PromptResponse])
+def get_recommended_prompts(
+    limit: int = Query(10, gt=0, le=50),
+    current_user = Depends(get_current_user)
+):
+    """
+    Get recommended prompts for the current user.
+    Prioritizes popular prompts in categories the user has previously engaged with.
+    """
+    supabase = get_supabase()
+    user_id = current_user["id"]
+
+    # 1. Identify categories of interest from ratings and bookmarks
+    rated = supabase.table("prompt_ratings").select("prompts(category_id)").eq("user_id", user_id).gte("rating", 4).execute()
+    bookmarked = supabase.table("bookmarks").select("prompts(category_id)").eq("user_id", user_id).execute()
+    
+    category_ids = {r["prompts"]["category_id"] for r in rated.data if r.get("prompts")}
+    category_ids.update({b["prompts"]["category_id"] for b in bookmarked.data if b.get("prompts")})
+
+    # 2. Identify prompts already interacted with to exclude them
+    interacted_res = supabase.table("prompt_ratings").select("prompt_id").eq("user_id", user_id).execute()
+    excluded_ids = {i["prompt_id"] for i in interacted_res.data}
+    
+    bookmark_ids = supabase.table("bookmarks").select("prompt_id").eq("user_id", user_id).execute()
+    excluded_ids.update({b["prompt_id"] for b in bookmark_ids.data})
+
+    query = supabase.table("prompts").select("*").eq("status", "published").neq("user_id", user_id)
+
+    if category_ids:
+        query = query.in_("category_id", list(category_ids))
+
+    # Order by popularity/quality
+    query = query.order("average_rating", desc=True).order("view_count", desc=True).limit(limit)
+    
+    response = query.execute()
+    
+    # Filter out already interacted prompts in Python for simplicity
+    recommended = [p for p in response.data if p["id"] not in excluded_ids]
+    
+    if len(recommended) < limit:
+        # Fallback: fill with globally popular prompts that are not in exclusion list
+        fallback_query = supabase.table("prompts").select("*").eq("status", "published").neq("user_id", user_id).order("average_rating", desc=True).limit(limit * 2)
+        fallback_res = fallback_query.execute()
+        for p in fallback_res.data:
+            if p["id"] not in excluded_ids and p["id"] not in [r["id"] for r in recommended]:
+                recommended.append(p)
+                if len(recommended) >= limit:
+                    break
+
+    return recommended[:limit]
+
+
