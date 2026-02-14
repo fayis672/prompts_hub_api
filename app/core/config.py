@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
     SUPABASE_JWT_SECRET: Optional[str] = None
+    SUPABASE_STORAGE_BUCKET: str = "dev"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
