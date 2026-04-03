@@ -24,7 +24,7 @@ def create_tag(
         # For now, let's return existing to avoid duplication errors client side
         return existing.data[0]
         
-    response = supabase.table("tags").insert(tag_in.model_dump()).execute()
+    response = supabase.table("tags").insert(tag_in.model_dump(mode='json')).execute()
     
     if not response.data:
         raise HTTPException(status_code=400, detail="Could not create tag")
@@ -62,7 +62,7 @@ def update_tag(
     """
     supabase = get_supabase()
     
-    update_data = tag_in.model_dump(exclude_unset=True)
+    update_data = tag_in.model_dump(mode='json', exclude_unset=True)
     
     response = supabase.table("tags").update(update_data).eq("id", str(tag_id)).execute()
     

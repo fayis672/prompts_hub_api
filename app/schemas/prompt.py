@@ -4,7 +4,7 @@ from enum import Enum
 from datetime import datetime
 from uuid import UUID
 from app.schemas.prompt_variable import PromptVariableCreateRequest
-from app.schemas.prompt_output import PromptOutputCreateRequest
+from app.schemas.prompt_output import PromptOutputCreateRequest, PromptOutputResponse
 
 class PromptType(str, Enum):
     TEXT_GENERATION = "text_generation"
@@ -71,6 +71,7 @@ class PromptResponse(PromptBase):
     rating_count: int
     rating_sum: int
     average_rating: float
+    like_count: int = 0
     fork_count: int
     comment_count: int
     
@@ -82,6 +83,8 @@ class PromptResponse(PromptBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime] = None
+
+    prompt_outputs: List[PromptOutputResponse] = []
 
     class Config:
         from_attributes = True

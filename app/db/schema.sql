@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS prompts (
     rating_count INT DEFAULT 0,
     rating_sum INT DEFAULT 0,
     average_rating DECIMAL(3,2) DEFAULT 0.00,
+    like_count INT DEFAULT 0,
     fork_count INT DEFAULT 0,
     comment_count INT DEFAULT 0,
     
@@ -284,6 +285,25 @@ CREATE TRIGGER update_prompt_ratings_updated_at
     BEFORE UPDATE ON prompt_ratings
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
+
+-- Prompt Likes Table
+CREATE TABLE IF NOT EXISTS prompt_likes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    prompt_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    
+    CONSTRAINT unique_user_prompt_like UNIQUE (user_id, prompt_id)
+);
+
+-- Prompt Likes Indices
+CREATE INDEX IF NOT EXISTS idx_prompt_likes_prompt_id ON prompt_likes(prompt_id);
+CREATE INDEX IF NOT EXISTS idx_prompt_likes_user_id ON prompt_likes(user_id);
+CREATE INDEX IF NOT EXISTS idx_prompt_likes_created_at ON prompt_likes(created_at);
 
 -- Collections Table
 CREATE TABLE IF NOT EXISTS collections (

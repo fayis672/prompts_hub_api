@@ -1,11 +1,20 @@
 from typing import List, Optional
 from uuid import UUID
+from enum import Enum
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from app.schemas.prompt import PromptCreate, PromptUpdate, PromptResponse
+from app.schemas.prompt import PromptCreate, PromptUpdate, PromptResponse, PromptType
 from app.schemas.prompt_rating import PromptRatingCreate, PromptRatingResponse
 from app.schemas.bookmark import BookmarkCreate, BookmarkResponse
+from app.schemas.prompt_like import PromptLikeResponse, PromptLikeToggleResponse
 from app.core.security import get_current_user
 from app.db.supabase import get_supabase
+
+
+class SortOrder(str, Enum):
+    new = "new"
+    most_liked = "most_liked"
+    most_viewed = "most_viewed"
+    most_bookmarked = "most_bookmarked"
 
 
 router = APIRouter()
@@ -48,7 +57,7 @@ def create_prompt(
             for out in variables_data:
                  # Check if loop variable is dict
                  if not isinstance(out, dict):
-                      out = out.model_dump()
+                      out = out.model_dump(mode='json')
                  out["prompt_id"] = prompt_id
             supabase.table("prompt_variables").insert(variables_data).execute()
 
@@ -76,7 +85,7 @@ def create_prompt(
         if outputs_data:
             for out in outputs_data:
                  if not isinstance(out, dict):
-                      out = out.model_dump()
+                      out = out.model_dump(mode='json')
                  out["prompt_id"] = prompt_id
                  out["user_id"] = user_id
             supabase.table("prompt_outputs").insert(outputs_data).execute()
@@ -90,25 +99,48 @@ def create_prompt(
 
 @router.get("/", response_model=List[PromptResponse])
 def read_prompts(
-    skip: int = 0,
-    limit: int = 100,
-    user_id: Optional[UUID] = None,
-    # Add other filters as needed
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, gt=0, le=100),
+    sort: SortOrder = Query(SortOrder.new, description="Sort order: new, most_liked, most_viewed, most_bookmarked"),
+    user_id: Optional[UUID] = Query(None, description="Filter by author user ID"),
+    category_id: Optional[UUID] = Query(None, description="Filter by category ID"),
+    prompt_type: Optional[PromptType] = Query(None, description="Filter by prompt type"),
+    status: Optional[str] = Query(None, description="Filter by status (draft, published, archived)"),
 ):
     """
-    Retrieve prompts.
+    Retrieve prompts with sorting and filtering.
+
+    - **sort=new** – newest first (default)
+    - **sort=most_liked** – highest average rating first
+    - **sort=most_viewed** – most views first
+    - **sort=most_bookmarked** – most bookmarks first
     """
     supabase = get_supabase()
-    query = supabase.table("prompts").select("*")
-    
+    query = supabase.table("prompts").select("*, prompt_outputs(*)")
+
+    # --- Filters ---
     if user_id:
         query = query.eq("user_id", str(user_id))
-        
-    # Pagination
-    # Supabase range is 0-indexed, inclusive? 
-    # range(from, to)
+    if category_id:
+        query = query.eq("category_id", str(category_id))
+    if prompt_type:
+        query = query.eq("prompt_type", prompt_type.value)
+    if status:
+        query = query.eq("status", status)
+
+    # --- Sorting ---
+    if sort == SortOrder.most_liked:
+        query = query.order("like_count", desc=True)
+    elif sort == SortOrder.most_viewed:
+        query = query.order("view_count", desc=True)
+    elif sort == SortOrder.most_bookmarked:
+        query = query.order("bookmark_count", desc=True)
+    else:  # SortOrder.new
+        query = query.order("created_at", desc=True)
+
+    # --- Pagination ---
     query = query.range(skip, skip + limit - 1)
-    
+
     response = query.execute()
     return response.data
 
@@ -118,7 +150,7 @@ def read_prompt(prompt_id: UUID):
     Get prompt by ID.
     """
     supabase = get_supabase()
-    response = supabase.table("prompts").select("*").eq("id", str(prompt_id)).execute()
+    response = supabase.table("prompts").select("*, prompt_outputs(*)").eq("id", str(prompt_id)).execute()
     
     if not response.data:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -147,7 +179,7 @@ def update_prompt(
     if existing.data[0]["user_id"] != user_id and not is_admin:
         raise HTTPException(status_code=403, detail="Not authorized to update this prompt")
     
-    update_data = prompt_in.model_dump(exclude_unset=True)
+    update_data = prompt_in.model_dump(mode='json', exclude_unset=True)
     
     response = supabase.table("prompts").update(update_data).eq("id", str(prompt_id)).execute()
     
@@ -178,12 +210,70 @@ def delete_prompt(
         raise HTTPException(status_code=403, detail="Not authorized to delete this prompt")
         
     supabase.table("prompts").delete().eq("id", str(prompt_id)).execute()
-    
-    supabase.table("prompts").delete().eq("id", str(prompt_id)).execute()
-    
+
     return None
 
 # Engagement Endpoints
+
+@router.post("/{prompt_id}/like", response_model=PromptLikeToggleResponse)
+def like_prompt(
+    prompt_id: UUID,
+    current_user = Depends(get_current_user)
+):
+    """
+    Like a prompt.
+    """
+    supabase = get_supabase()
+    user_id = current_user["id"]
+    
+    # Check if already liked
+    existing = supabase.table("prompt_likes").select("*").eq("user_id", user_id).eq("prompt_id", str(prompt_id)).execute()
+    if existing.data:
+        # Already liked. Return current count
+        prompt_res = supabase.table("prompts").select("like_count").eq("id", str(prompt_id)).execute()
+        return {"has_liked": True, "like_count": prompt_res.data[0].get("like_count") or 0}
+        
+    data = {
+        "user_id": user_id,
+        "prompt_id": str(prompt_id)
+    }
+    
+    supabase.table("prompt_likes").insert(data).execute()
+    
+    prompt_res = supabase.table("prompts").select("like_count").eq("id", str(prompt_id)).execute()
+    current_count = prompt_res.data[0].get("like_count") or 0 if prompt_res.data else 0
+    new_count = current_count + 1
+    
+    supabase.table("prompts").update({"like_count": new_count}).eq("id", str(prompt_id)).execute()
+    
+    return {"has_liked": True, "like_count": new_count}
+
+@router.delete("/{prompt_id}/like", response_model=PromptLikeToggleResponse)
+def unlike_prompt(
+    prompt_id: UUID,
+    current_user = Depends(get_current_user)
+):
+    """
+    Remove like from a prompt.
+    """
+    supabase = get_supabase()
+    user_id = current_user["id"]
+    
+    existing = supabase.table("prompt_likes").select("*").eq("user_id", user_id).eq("prompt_id", str(prompt_id)).execute()
+    if not existing.data:
+        prompt_res = supabase.table("prompts").select("like_count").eq("id", str(prompt_id)).execute()
+        count = prompt_res.data[0].get("like_count") or 0 if prompt_res.data else 0
+        return {"has_liked": False, "like_count": count}
+    
+    supabase.table("prompt_likes").delete().eq("user_id", user_id).eq("prompt_id", str(prompt_id)).execute()
+    
+    prompt_res = supabase.table("prompts").select("like_count").eq("id", str(prompt_id)).execute()
+    current_count = prompt_res.data[0].get("like_count") or 0 if prompt_res.data else 0
+    new_count = max(0, current_count - 1)
+    
+    supabase.table("prompts").update({"like_count": new_count}).eq("id", str(prompt_id)).execute()
+    
+    return {"has_liked": False, "like_count": new_count}
 
 @router.post("/{prompt_id}/rate", response_model=PromptRatingResponse)
 def rate_prompt(
@@ -262,6 +352,144 @@ def unbookmark_prompt(
     return None
 
 
+@router.get("/category/{category_id}", response_model=List[PromptResponse])
+def get_prompts_by_category(
+    category_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, gt=0, le=100),
+    sort: SortOrder = Query(SortOrder.new, description="Sort order: new, most_liked, most_viewed, most_bookmarked"),
+    status: Optional[str] = Query(None, description="Filter by status (draft, published, archived)"),
+):
+    """
+    Get all prompts belonging to a specific category.
+
+    Supports the same `sort` options as the main prompts list:
+    - **new** – newest first (default)
+    - **most_liked** – highest average rating first
+    - **most_viewed** – most views first
+    - **most_bookmarked** – most bookmarks first
+    """
+    supabase = get_supabase()
+
+    # Verify the category exists
+    cat_res = supabase.table("categories").select("id").eq("id", str(category_id)).execute()
+    if not cat_res.data:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    query = supabase.table("prompts").select("*, prompt_outputs(*)").eq("category_id", str(category_id))
+
+    if status:
+        query = query.eq("status", status)
+
+    if sort == SortOrder.most_liked:
+        query = query.order("like_count", desc=True)
+    elif sort == SortOrder.most_viewed:
+        query = query.order("view_count", desc=True)
+    elif sort == SortOrder.most_bookmarked:
+        query = query.order("bookmark_count", desc=True)
+    else:
+        query = query.order("created_at", desc=True)
+
+    query = query.range(skip, skip + limit - 1)
+    response = query.execute()
+    return response.data
+
+
+@router.get("/tag/{tag}", response_model=List[PromptResponse])
+def get_prompts_by_tag(
+    tag: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, gt=0, le=100),
+    sort: SortOrder = Query(SortOrder.new, description="Sort order: new, most_liked, most_viewed, most_bookmarked"),
+    status: Optional[str] = Query(None, description="Filter by status (draft, published, archived)"),
+):
+    """
+    Get all prompts associated with a specific tag.
+
+    The `tag` path parameter is matched against the tag **slug** first,
+    then falls back to a case-insensitive **name** match.
+
+    Supports the same `sort` options as the main prompts list.
+    """
+    supabase = get_supabase()
+
+    # Resolve tag — try slug first, then name
+    tag_res = supabase.table("tags").select("id, slug, name").eq("slug", tag).execute()
+    if not tag_res.data:
+        tag_res = supabase.table("tags").select("id, slug, name").ilike("name", tag).execute()
+    if not tag_res.data:
+        raise HTTPException(status_code=404, detail=f"Tag '{tag}' not found")
+
+    tag_id = tag_res.data[0]["id"]
+
+    # Fetch prompt IDs linked to this tag via the prompt_tags join table
+    pt_res = supabase.table("prompt_tags").select("prompt_id").eq("tag_id", tag_id).execute()
+    if not pt_res.data:
+        return []
+
+    prompt_ids = [row["prompt_id"] for row in pt_res.data]
+
+    query = supabase.table("prompts").select("*, prompt_outputs(*)").in_("id", prompt_ids)
+
+    if status:
+        query = query.eq("status", status)
+
+    if sort == SortOrder.most_liked:
+        query = query.order("like_count", desc=True)
+    elif sort == SortOrder.most_viewed:
+        query = query.order("view_count", desc=True)
+    elif sort == SortOrder.most_bookmarked:
+        query = query.order("bookmark_count", desc=True)
+    else:
+        query = query.order("created_at", desc=True)
+
+    query = query.range(skip, skip + limit - 1)
+    response = query.execute()
+    return response.data
+
+
+@router.get("/trending", response_model=List[PromptResponse])
+def get_trending_prompts(
+    limit: int = Query(20, gt=0, le=100),
+):
+    """
+    Get currently trending prompts.
+
+    Returns prompts from the pre-calculated `trending_prompts` table, ordered
+    by rank (ascending). The trending score is computed based on views,
+    ratings, and bookmarks in the last 24 hours.
+    """
+    supabase = get_supabase()
+
+    # Fetch active trending records ordered by rank
+    trending_res = (
+        supabase.table("trending_prompts")
+        .select("prompt_id, rank")
+        .order("rank", desc=False)
+        .limit(limit)
+        .execute()
+    )
+
+    if not trending_res.data:
+        return []
+
+    prompt_ids = [row["prompt_id"] for row in trending_res.data]
+
+    # Fetch the full prompt details for those IDs
+    prompts_res = (
+        supabase.table("prompts")
+        .select("*, prompt_outputs(*)")
+        .in_("id", prompt_ids)
+        .execute()
+    )
+
+    # Re-order results to match the rank order from trending_prompts
+    prompts_by_id = {p["id"]: p for p in prompts_res.data}
+    ordered = [prompts_by_id[pid] for pid in prompt_ids if pid in prompts_by_id]
+
+    return ordered
+
+
 @router.get("/recommendations/prompts", response_model=List[PromptResponse])
 def get_recommended_prompts(
     limit: int = Query(10, gt=0, le=50),
@@ -277,33 +505,33 @@ def get_recommended_prompts(
     # 1. Identify categories of interest from ratings and bookmarks
     rated = supabase.table("prompt_ratings").select("prompts(category_id)").eq("user_id", user_id).gte("rating", 4).execute()
     bookmarked = supabase.table("bookmarks").select("prompts(category_id)").eq("user_id", user_id).execute()
-    
+
     category_ids = {r["prompts"]["category_id"] for r in rated.data if r.get("prompts")}
     category_ids.update({b["prompts"]["category_id"] for b in bookmarked.data if b.get("prompts")})
 
     # 2. Identify prompts already interacted with to exclude them
     interacted_res = supabase.table("prompt_ratings").select("prompt_id").eq("user_id", user_id).execute()
     excluded_ids = {i["prompt_id"] for i in interacted_res.data}
-    
+
     bookmark_ids = supabase.table("bookmarks").select("prompt_id").eq("user_id", user_id).execute()
     excluded_ids.update({b["prompt_id"] for b in bookmark_ids.data})
 
-    query = supabase.table("prompts").select("*").eq("status", "published").neq("user_id", user_id)
+    query = supabase.table("prompts").select("*, prompt_outputs(*)").eq("status", "published").neq("user_id", user_id)
 
     if category_ids:
         query = query.in_("category_id", list(category_ids))
 
     # Order by popularity/quality
     query = query.order("average_rating", desc=True).order("view_count", desc=True).limit(limit)
-    
+
     response = query.execute()
-    
+
     # Filter out already interacted prompts in Python for simplicity
     recommended = [p for p in response.data if p["id"] not in excluded_ids]
-    
+
     if len(recommended) < limit:
         # Fallback: fill with globally popular prompts that are not in exclusion list
-        fallback_query = supabase.table("prompts").select("*").eq("status", "published").neq("user_id", user_id).order("average_rating", desc=True).limit(limit * 2)
+        fallback_query = supabase.table("prompts").select("*, prompt_outputs(*)").eq("status", "published").neq("user_id", user_id).order("average_rating", desc=True).limit(limit * 2)
         fallback_res = fallback_query.execute()
         for p in fallback_res.data:
             if p["id"] not in excluded_ids and p["id"] not in [r["id"] for r in recommended]:

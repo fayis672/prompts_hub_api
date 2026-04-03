@@ -22,7 +22,7 @@ def create_category(
     if existing.data:
         raise HTTPException(status_code=400, detail="Category with this slug already exists")
         
-    response = supabase.table("categories").insert(category_in.model_dump()).execute()
+    response = supabase.table("categories").insert(category_in.model_dump(mode='json')).execute()
     
     if not response.data:
         raise HTTPException(status_code=400, detail="Could not create category")
@@ -73,7 +73,7 @@ def update_category(
     """
     supabase = get_supabase()
     
-    update_data = category_in.model_dump(exclude_unset=True)
+    update_data = category_in.model_dump(mode='json', exclude_unset=True)
     
     if not update_data:
         # Fetch existing to return

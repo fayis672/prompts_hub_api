@@ -57,7 +57,7 @@ def create_user(
     if existing_username.data:
          raise HTTPException(status_code=400, detail="User with this username already exists")
          
-    user_data = user_in.model_dump()
+    user_data = user_in.model_dump(mode='json')
     user_data["id"] = user_id
     user_data["email"] = user_email
     user_data["password_hash"] = "managed_by_supabase_auth"
@@ -92,7 +92,7 @@ def update_user_me(
     supabase = get_supabase()
     user_id = current_user["id"]
     
-    update_data = user_in.model_dump(exclude_unset=True)
+    update_data = user_in.model_dump(mode='json', exclude_unset=True)
     
     if not update_data:
         return current_user
@@ -153,7 +153,7 @@ def update_user_by_id(
     if not existing.data:
         raise HTTPException(status_code=404, detail="User not found")
     
-    update_data = user_in.model_dump(exclude_unset=True)
+    update_data = user_in.model_dump(mode='json', exclude_unset=True)
     
     if role:
         update_data["role"] = role

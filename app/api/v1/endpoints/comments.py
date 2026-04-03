@@ -19,7 +19,7 @@ def create_comment(
     supabase = get_supabase()
     user_id = current_user["id"]
     
-    data = comment_in.model_dump()
+    data = comment_in.model_dump(mode="json")
     data["user_id"] = user_id
     
     # Optional: Verify prompt_id exists and parent_comment_id (if provided) exists
@@ -70,7 +70,7 @@ def update_comment(
     if existing.data[0]["user_id"] != user_id and not is_admin:
         raise HTTPException(status_code=403, detail="Not authorized")
         
-    update_data = comment_in.model_dump(exclude_unset=True)
+    update_data = comment_in.model_dump(exclude_unset=True, mode="json")
     if not is_admin:
         # Prevent regular users from approving/moderating via update
         update_data.pop("is_approved", None)
