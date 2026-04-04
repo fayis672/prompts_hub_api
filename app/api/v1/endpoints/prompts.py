@@ -144,6 +144,52 @@ def read_prompts(
     response = query.execute()
     return response.data
 
+@router.get("/search", response_model=List[PromptResponse])
+def search_prompts(
+    q: str = Query(..., min_length=1, description="Search query string"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, gt=0, le=100),
+    sort: SortOrder = Query(SortOrder.new),
+    category_id: Optional[UUID] = Query(None),
+    prompt_type: Optional[PromptType] = Query(None),
+):
+    """
+    Search prompts by title or description using a keyword query.
+
+    - **q** – Required search keyword
+    - **sort** – Sort order: new, most_liked, most_viewed, most_bookmarked
+    - **category_id** – Optional category filter
+    - **prompt_type** – Optional type filter (text, image, etc.)
+    """
+    supabase = get_supabase()
+
+    # Search across title and description using ilike (case insensitive)
+    query = (
+        supabase.table("prompts")
+        .select("*, prompt_outputs(*)")
+        .or_(f"title.ilike.%{q}%,description.ilike.%{q}%")
+        .eq("status", "published")
+    )
+
+    if category_id:
+        query = query.eq("category_id", str(category_id))
+    if prompt_type:
+        query = query.eq("prompt_type", prompt_type.value)
+
+    if sort == SortOrder.most_liked:
+        query = query.order("like_count", desc=True)
+    elif sort == SortOrder.most_viewed:
+        query = query.order("view_count", desc=True)
+    elif sort == SortOrder.most_bookmarked:
+        query = query.order("bookmark_count", desc=True)
+    else:
+        query = query.order("created_at", desc=True)
+
+    query = query.range(skip, skip + limit - 1)
+
+    response = query.execute()
+    return response.data
+
 @router.get("/{prompt_id}", response_model=PromptResponse)
 def read_prompt(prompt_id: UUID):
     """
