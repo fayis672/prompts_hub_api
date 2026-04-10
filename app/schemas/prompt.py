@@ -5,6 +5,7 @@ from datetime import datetime
 from uuid import UUID
 from app.schemas.prompt_variable import PromptVariableCreateRequest
 from app.schemas.prompt_output import PromptOutputCreateRequest, PromptOutputResponse
+from app.schemas.user import UserPublic
 
 class PromptType(str, Enum):
     TEXT_GENERATION = "text_generation"
@@ -85,6 +86,8 @@ class PromptResponse(PromptBase):
     deleted_at: Optional[datetime] = None
 
     prompt_outputs: List[PromptOutputResponse] = []
+    author: Optional[UserPublic] = None
+
 
     class Config:
         from_attributes = True

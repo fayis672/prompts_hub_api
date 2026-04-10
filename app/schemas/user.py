@@ -23,6 +23,17 @@ class UserBase(BaseModel):
     github_handle: Optional[str] = Field(None, max_length=50)
     linkedin_url: Optional[str] = Field(None, max_length=500)
 
+class UserPublic(BaseModel):
+    id: UUID
+    username: str
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    total_followers: int = 0
+
+    class Config:
+        from_attributes = True
+
+
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, description="Raw password to be hashed")
 
@@ -72,3 +83,11 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+class UserProfileDetails(UserResponse):
+    is_following: bool = False
+
+class UserFollowResponse(BaseModel):
+    has_followed: bool
+    follower_count: int
+

@@ -2,8 +2,10 @@ from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from datetime import datetime
-from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserRole, UserExistsResponse, UserCreateRequest
-from app.core.security import get_current_user, get_current_admin, get_current_auth_user
+from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserRole, UserExistsResponse, UserCreateRequest, UserProfileDetails, UserFollowResponse
+from app.schemas.prompt import PromptResponse
+from app.core.security import get_current_user, get_current_admin, get_current_auth_user, get_current_user_optional
+
 from app.db.supabase import get_supabase
 
 router = APIRouter()
@@ -208,3 +210,150 @@ def get_recommended_prompters(
     # Fetch full user details for the top creators
     response = supabase.table("users").select("*").in_("id", top_creator_ids).execute()
     return response.data
+
+
+@router.post("/profile/{target_username}/follow", response_model=UserFollowResponse)
+def follow_user(
+    target_username: str,
+    current_user = Depends(get_current_user)
+):
+    """
+    Follow a user by username.
+    """
+    supabase = get_supabase()
+    follower_id = current_user["id"]
+    
+    # Get target user ID from username
+    target_res = supabase.table("users").select("id, total_followers").eq("username", target_username).execute()
+    if not target_res.data:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    following_id = target_res.data[0]["id"]
+    
+    if follower_id == following_id:
+        raise HTTPException(status_code=400, detail="Cannot follow yourself")
+        
+    # Check if already following
+    existing = supabase.table("follows").select("*").eq("follower_id", str(follower_id)).eq("following_id", str(following_id)).execute()
+    if existing.data:
+        # Already followed
+        return {"has_followed": True, "follower_count": target_res.data[0].get("total_followers") or 0}
+        
+    # Insert follow
+    try:
+        supabase.table("follows").insert({
+            "follower_id": str(follower_id),
+            "following_id": str(following_id)
+        }).execute()
+        
+        # Increment total_followers for target
+        new_count = (target_res.data[0].get("total_followers") or 0) + 1
+        supabase.table("users").update({"total_followers": new_count}).eq("id", str(following_id)).execute()
+        
+        # Increment total_following for current user
+        current_res = supabase.table("users").select("total_following").eq("id", str(follower_id)).execute()
+        if current_res.data:
+            new_following = (current_res.data[0].get("total_following") or 0) + 1
+            supabase.table("users").update({"total_following": new_following}).eq("id", str(follower_id)).execute()
+            
+        return {"has_followed": True, "follower_count": new_count}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/profile/{target_username}/follow", response_model=UserFollowResponse)
+def unfollow_user(
+    target_username: str,
+    current_user = Depends(get_current_user)
+):
+    """
+    Unfollow a user by username.
+    """
+    supabase = get_supabase()
+    follower_id = current_user["id"]
+    
+    target_res = supabase.table("users").select("id, total_followers").eq("username", target_username).execute()
+    if not target_res.data:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    following_id = target_res.data[0]["id"]
+    
+    existing = supabase.table("follows").select("*").eq("follower_id", str(follower_id)).eq("following_id", str(following_id)).execute()
+    if not existing.data:
+        return {"has_followed": False, "follower_count": target_res.data[0].get("total_followers") or 0}
+        
+    try:
+        supabase.table("follows").delete().eq("follower_id", str(follower_id)).eq("following_id", str(following_id)).execute()
+        
+        # Decrement total_followers for target
+        new_count = max(0, (target_res.data[0].get("total_followers") or 0) - 1)
+        supabase.table("users").update({"total_followers": new_count}).eq("id", str(following_id)).execute()
+        
+        # Decrement total_following for current user
+        current_res = supabase.table("users").select("total_following").eq("id", str(follower_id)).execute()
+        if current_res.data:
+            new_following = max(0, (current_res.data[0].get("total_following") or 0) - 1)
+            supabase.table("users").update({"total_following": new_following}).eq("id", str(follower_id)).execute()
+            
+        return {"has_followed": False, "follower_count": new_count}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/profile/{username}", response_model=UserProfileDetails)
+def get_user_profile(
+    username: str,
+    current_user = Depends(get_current_user_optional)
+):
+    """
+    Get a user's public profile by username, including follow status.
+    """
+    supabase = get_supabase()
+    response = supabase.table("users").select("*").eq("username", username).execute()
+    
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    user = response.data[0]
+    
+    is_following = False
+    if current_user:
+        follower_id = current_user["id"]
+        following_id = user["id"]
+        if str(follower_id) != str(following_id):
+            follow_check = supabase.table("follows").select("id").eq("follower_id", str(follower_id)).eq("following_id", str(following_id)).execute()
+            if follow_check.data:
+                is_following = True
+                
+    user["is_following"] = is_following
+    return user
+
+@router.get("/profile/{username}/prompts", response_model=List[PromptResponse])
+def get_user_prompts(
+    username: str,
+    skip: int = 0,
+    limit: int = 20
+):
+    """
+    Get a list of published prompts created by this user.
+    """
+    supabase = get_supabase()
+    
+    # 1. Resolve username to user_id
+    user_res = supabase.table("users").select("id").eq("username", username).execute()
+    if not user_res.data:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    target_user_id = user_res.data[0]["id"]
+    
+    # 2. Fetch published prompts by user_id
+    query = (
+        supabase.table("prompts")
+        .select("*, prompt_outputs(*), author:users(*)")
+        .eq("user_id", str(target_user_id))
+        .eq("status", "published")
+        .order("created_at", desc=True)
+        .range(skip, skip + limit - 1)
+    )
+    
+    response = query.execute()
+    return response.data
+

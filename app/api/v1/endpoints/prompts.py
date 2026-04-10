@@ -118,7 +118,8 @@ def read_prompts(
     - **sort=most_bookmarked** – most bookmarks first
     """
     supabase = get_supabase()
-    query = supabase.table("prompts").select("*, prompt_outputs(*)")
+    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)")
+
 
     # --- Filters ---
     if user_id:
@@ -168,7 +169,8 @@ def search_prompts(
     # Search across title and description using ilike (case insensitive)
     query = (
         supabase.table("prompts")
-        .select("*, prompt_outputs(*)")
+        .select("*, prompt_outputs(*), author:users(*)")
+
         .or_(f"title.ilike.%{q}%,description.ilike.%{q}%")
         .eq("status", "published")
     )
@@ -203,7 +205,8 @@ def read_prompt(
     Get prompt by ID. Records a view in the background.
     """
     supabase = get_supabase()
-    response = supabase.table("prompts").select("*, prompt_outputs(*)").eq("id", str(prompt_id)).execute()
+    response = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)").eq("id", str(prompt_id)).execute()
+
     
     if not response.data:
         raise HTTPException(status_code=404, detail="Prompt not found")
@@ -479,7 +482,8 @@ def get_prompts_by_category(
     if not cat_res.data:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    query = supabase.table("prompts").select("*, prompt_outputs(*)").eq("category_id", str(category_id))
+    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)").eq("category_id", str(category_id))
+
 
     if status:
         query = query.eq("status", status)
@@ -532,7 +536,8 @@ def get_prompts_by_tag(
 
     prompt_ids = [row["prompt_id"] for row in pt_res.data]
 
-    query = supabase.table("prompts").select("*, prompt_outputs(*)").in_("id", prompt_ids)
+    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)").in_("id", prompt_ids)
+
 
     if status:
         query = query.eq("status", status)
@@ -581,7 +586,8 @@ def get_trending_prompts(
     # Fetch the full prompt details for those IDs
     prompts_res = (
         supabase.table("prompts")
-        .select("*, prompt_outputs(*)")
+        .select("*, prompt_outputs(*), author:users(*)")
+
         .in_("id", prompt_ids)
         .execute()
     )
@@ -600,47 +606,90 @@ def get_recommended_prompts(
 ):
     """
     Get recommended prompts for the current user.
-    Prioritizes popular prompts in categories the user has previously engaged with.
+    Prioritizes prompts from followed users, then popular prompts in categories the user has previously engaged with.
     """
     supabase = get_supabase()
     user_id = current_user["id"]
+    
+    recommended = []
 
-    # 1. Identify categories of interest from ratings and bookmarks
-    rated = supabase.table("prompt_ratings").select("prompts(category_id)").eq("user_id", user_id).gte("rating", 4).execute()
-    bookmarked = supabase.table("bookmarks").select("prompts(category_id)").eq("user_id", user_id).execute()
-
-    category_ids = {r["prompts"]["category_id"] for r in rated.data if r.get("prompts")}
-    category_ids.update({b["prompts"]["category_id"] for b in bookmarked.data if b.get("prompts")})
-
-    # 2. Identify prompts already interacted with to exclude them
+    # 1. Identify prompts already interacted with to exclude them
     interacted_res = supabase.table("prompt_ratings").select("prompt_id").eq("user_id", user_id).execute()
     excluded_ids = {i["prompt_id"] for i in interacted_res.data}
 
     bookmark_ids = supabase.table("bookmarks").select("prompt_id").eq("user_id", user_id).execute()
     excluded_ids.update({b["prompt_id"] for b in bookmark_ids.data})
-
-    query = supabase.table("prompts").select("*, prompt_outputs(*)").eq("status", "published").neq("user_id", user_id)
-
-    if category_ids:
-        query = query.in_("category_id", list(category_ids))
-
-    # Order by popularity/quality
-    query = query.order("average_rating", desc=True).order("view_count", desc=True).limit(limit)
-
-    response = query.execute()
-
-    # Filter out already interacted prompts in Python for simplicity
-    recommended = [p for p in response.data if p["id"] not in excluded_ids]
-
-    if len(recommended) < limit:
-        # Fallback: fill with globally popular prompts that are not in exclusion list
-        fallback_query = supabase.table("prompts").select("*, prompt_outputs(*)").eq("status", "published").neq("user_id", user_id).order("average_rating", desc=True).limit(limit * 2)
-        fallback_res = fallback_query.execute()
-        for p in fallback_res.data:
-            if p["id"] not in excluded_ids and p["id"] not in [r["id"] for r in recommended]:
+    
+    # 2. Add prompts from followed users
+    follows_res = supabase.table("follows").select("following_id").eq("follower_id", user_id).execute()
+    following_ids = [f["following_id"] for f in follows_res.data]
+    
+    if following_ids:
+        # Get recent/top prompts from followed users
+        followed_prompts_res = (
+            supabase.table("prompts")
+            .select("*, prompt_outputs(*), author:users(*)")
+            .eq("status", "published")
+            .in_("user_id", following_ids)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        
+        for p in followed_prompts_res.data:
+            if p["id"] not in excluded_ids:
                 recommended.append(p)
+                excluded_ids.add(p["id"])
+                
                 if len(recommended) >= limit:
-                    break
+                    return recommended
+
+    # 3. If limit not reached, identify categories of interest from ratings and bookmarks
+    rated = supabase.table("prompt_ratings").select("prompts(category_id)").eq("user_id", user_id).gte("rating", 4).execute()
+    bookmarked = supabase.table("bookmarks").select("prompts(category_id)").eq("user_id", user_id).execute()
+
+    category_ids = {r["prompts"]["category_id"] for r in rated.data if r.get("prompts")}
+    category_ids.update({b["prompts"]["category_id"] for b in bookmarked.data if b.get("prompts")})
+    
+    if category_ids:
+        query = (
+            supabase.table("prompts")
+            .select("*, prompt_outputs(*), author:users(*)")
+            .eq("status", "published")
+            .neq("user_id", user_id)
+            .in_("category_id", list(category_ids))
+            .order("average_rating", desc=True)
+            .order("view_count", desc=True)
+            .limit(limit)
+        )
+        
+        category_prompts_res = query.execute()
+        
+        for p in category_prompts_res.data:
+            if p["id"] not in excluded_ids:
+                recommended.append(p)
+                excluded_ids.add(p["id"])
+                
+                if len(recommended) >= limit:
+                    return recommended
+
+    # 4. Fallback: fill with globally popular prompts
+    fallback_query = (
+        supabase.table("prompts")
+        .select("*, prompt_outputs(*), author:users(*)")
+        .eq("status", "published")
+        .neq("user_id", user_id)
+        .order("average_rating", desc=True)
+        .limit(limit * 2)
+    )
+
+    fallback_res = fallback_query.execute()
+    for p in fallback_res.data:
+        if p["id"] not in excluded_ids:
+            recommended.append(p)
+            excluded_ids.add(p["id"])
+            if len(recommended) >= limit:
+                break
 
     return recommended[:limit]
 
