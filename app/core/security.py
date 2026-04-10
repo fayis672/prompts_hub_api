@@ -2,9 +2,12 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.db.supabase import get_supabase
 
+from typing import Optional
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+
     """
     Verifies the JWT token using Supabase's client (or you can do local validation).
     For now, this is a placeholder that passes the token to Supabase to get the user.
@@ -80,4 +83,14 @@ def get_current_admin(current_user: dict = Depends(get_current_user)):
             detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional)):
+    if not credentials:
+        return None
+    try:
+        return await get_current_user(credentials)
+    except:
+        return None
+
 

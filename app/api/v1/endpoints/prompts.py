@@ -1,13 +1,15 @@
 from typing import List, Optional
 from uuid import UUID
 from enum import Enum
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, BackgroundTasks
 from app.schemas.prompt import PromptCreate, PromptUpdate, PromptResponse, PromptType
 from app.schemas.prompt_rating import PromptRatingCreate, PromptRatingResponse
 from app.schemas.bookmark import BookmarkCreate, BookmarkResponse
 from app.schemas.prompt_like import PromptLikeResponse, PromptLikeToggleResponse
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_current_user_optional
 from app.db.supabase import get_supabase
+
+
 
 
 class SortOrder(str, Enum):
@@ -191,9 +193,14 @@ def search_prompts(
     return response.data
 
 @router.get("/{prompt_id}", response_model=PromptResponse)
-def read_prompt(prompt_id: UUID):
+def read_prompt(
+    prompt_id: UUID, 
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user = Depends(get_current_user_optional)
+):
     """
-    Get prompt by ID.
+    Get prompt by ID. Records a view in the background.
     """
     supabase = get_supabase()
     response = supabase.table("prompts").select("*, prompt_outputs(*)").eq("id", str(prompt_id)).execute()
@@ -201,7 +208,57 @@ def read_prompt(prompt_id: UUID):
     if not response.data:
         raise HTTPException(status_code=404, detail="Prompt not found")
         
-    return response.data[0]
+    prompt = response.data[0]
+
+    # Record view in background
+    user_id = current_user["id"] if current_user else None
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    referrer = request.headers.get("referer")
+    
+    background_tasks.add_task(
+        record_prompt_view, 
+        prompt_id=str(prompt_id), 
+        user_id=user_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        referrer=referrer
+    )
+        
+    return prompt
+
+def record_prompt_view(
+    prompt_id: str, 
+    user_id: Optional[str] = None, 
+    ip_address: Optional[str] = None, 
+    user_agent: Optional[str] = None, 
+    referrer: Optional[str] = None
+):
+    """
+    Helper to record a view and increment count in the background.
+    """
+    supabase = get_supabase()
+    
+    try:
+        # 1. Insert into prompt_views
+        view_data = {
+            "prompt_id": prompt_id,
+        }
+        if user_id: view_data["user_id"] = user_id
+        if ip_address: view_data["ip_address"] = ip_address
+        if user_agent: view_data["user_agent"] = user_agent
+        if referrer: view_data["referrer"] = referrer
+        
+        supabase.table("prompt_views").insert(view_data).execute()
+        
+        # 2. Increment view_count in prompts table
+        prompt_res = supabase.table("prompts").select("view_count").eq("id", prompt_id).execute()
+        if prompt_res.data:
+            current_count = prompt_res.data[0].get("view_count") or 0
+            supabase.table("prompts").update({"view_count": current_count + 1}).eq("id", prompt_id).execute()
+    except Exception as e:
+        print(f"Error recording view: {e}")
+
 
 @router.put("/{prompt_id}", response_model=PromptResponse)
 def update_prompt(

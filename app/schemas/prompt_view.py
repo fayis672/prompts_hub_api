@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, IPvAnyAddress
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
+from app.schemas.prompt import PromptResponse
 
 class PromptViewBase(BaseModel):
     ip_address: Optional[str] = Field(None, max_length=45)
@@ -22,3 +23,6 @@ class PromptViewResponse(PromptViewBase):
 
     class Config:
         from_attributes = True
+
+class PromptHistoryResponse(PromptViewResponse):
+    prompt: Optional[PromptResponse] = None
