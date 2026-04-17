@@ -60,6 +60,20 @@ class PromptUpdate(BaseModel):
     slug: Optional[str] = Field(None, max_length=300)
     meta_description: Optional[str] = None
 
+class TagResponse(BaseModel):
+    id: UUID
+    name: str
+    slug: str
+
+    class Config:
+        from_attributes = True
+
+class PromptTagLink(BaseModel):
+    tags: Optional[TagResponse] = None
+
+    class Config:
+        from_attributes = True
+
 class PromptResponse(PromptBase):
     id: UUID
     user_id: UUID
@@ -87,7 +101,7 @@ class PromptResponse(PromptBase):
 
     prompt_outputs: List[PromptOutputResponse] = []
     author: Optional[UserPublic] = None
-
+    prompt_tags: List[PromptTagLink] = []
 
     class Config:
         from_attributes = True

@@ -347,7 +347,7 @@ def get_user_prompts(
     # 2. Fetch published prompts by user_id
     query = (
         supabase.table("prompts")
-        .select("*, prompt_outputs(*), author:users(*)")
+        .select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
         .eq("user_id", str(target_user_id))
         .eq("status", "published")
         .order("created_at", desc=True)
@@ -356,4 +356,3 @@ def get_user_prompts(
     
     response = query.execute()
     return response.data
-

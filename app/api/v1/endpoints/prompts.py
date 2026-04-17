@@ -118,7 +118,7 @@ def read_prompts(
     - **sort=most_bookmarked** – most bookmarks first
     """
     supabase = get_supabase()
-    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)")
+    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
 
 
     # --- Filters ---
@@ -169,7 +169,7 @@ def search_prompts(
     # Search across title and description using ilike (case insensitive)
     query = (
         supabase.table("prompts")
-        .select("*, prompt_outputs(*), author:users(*)")
+        .select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
 
         .or_(f"title.ilike.%{q}%,description.ilike.%{q}%")
         .eq("status", "published")
@@ -205,7 +205,7 @@ def read_prompt(
     Get prompt by ID. Records a view in the background.
     """
     supabase = get_supabase()
-    response = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)").eq("id", str(prompt_id)).execute()
+    response = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))").eq("id", str(prompt_id)).execute()
 
     
     if not response.data:
@@ -482,7 +482,7 @@ def get_prompts_by_category(
     if not cat_res.data:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)").eq("category_id", str(category_id))
+    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))").eq("category_id", str(category_id))
 
 
     if status:
@@ -536,7 +536,7 @@ def get_prompts_by_tag(
 
     prompt_ids = [row["prompt_id"] for row in pt_res.data]
 
-    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*)").in_("id", prompt_ids)
+    query = supabase.table("prompts").select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))").in_("id", prompt_ids)
 
 
     if status:
@@ -586,7 +586,7 @@ def get_trending_prompts(
     # Fetch the full prompt details for those IDs
     prompts_res = (
         supabase.table("prompts")
-        .select("*, prompt_outputs(*), author:users(*)")
+        .select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
 
         .in_("id", prompt_ids)
         .execute()
@@ -628,7 +628,7 @@ def get_recommended_prompts(
         # Get recent/top prompts from followed users
         followed_prompts_res = (
             supabase.table("prompts")
-            .select("*, prompt_outputs(*), author:users(*)")
+            .select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
             .eq("status", "published")
             .in_("user_id", following_ids)
             .order("created_at", desc=True)
@@ -654,7 +654,7 @@ def get_recommended_prompts(
     if category_ids:
         query = (
             supabase.table("prompts")
-            .select("*, prompt_outputs(*), author:users(*)")
+            .select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
             .eq("status", "published")
             .neq("user_id", user_id)
             .in_("category_id", list(category_ids))
@@ -676,7 +676,7 @@ def get_recommended_prompts(
     # 4. Fallback: fill with globally popular prompts
     fallback_query = (
         supabase.table("prompts")
-        .select("*, prompt_outputs(*), author:users(*)")
+        .select("*, prompt_outputs(*), author:users(*), prompt_tags(tags(id, name, slug))")
         .eq("status", "published")
         .neq("user_id", user_id)
         .order("average_rating", desc=True)
