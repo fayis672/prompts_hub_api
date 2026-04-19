@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import prompts, users, categories, tags, comments, files, history
+from app.api.v1.endpoints import prompts, users, categories, tags, comments, files, history, admin
 
 api_router = APIRouter()
 
@@ -14,6 +14,7 @@ api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
 api_router.include_router(comments.router, prefix="/comments", tags=["comments"])
 api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(history.router, prefix="/history", tags=["history"])
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 
 
